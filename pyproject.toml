@@ -1,0 +1,13 @@
+[project]
+name = "mpc-for-cartpole"
+version = "0.1.0"
+description = "MPC controller for inverted pendulum (cart-pole) system"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "cvxpy>=1.8.1",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.3",
+    "openpyxl>=3.1.0",
+    "scipy>=1.17.1",
+]
