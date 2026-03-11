@@ -1,59 +1,71 @@
-
-
 import time
 import sys
 import numpy as np
 from src.visualization.mpc_panel import show_mpc_panel
 from src.logger import save_log, save_pdf
-import src.config as config
+from src.config import PhysicalParams, MPCTuning, ConstraintLimits, DisturbanceConfig
 
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-def override_config(params):
-    config.dt = params["dt"]
-    config.Q = np.diag(params["q_diag"])
-    config.R = np.array([[params["r_val"]]])
-    config.S = np.diag(params["s_diag"])
+
+def build_config(params):
+    """
+    Constructs structured dataclass configuration objects from the GUI panel dict.
+    """
+    physics = PhysicalParams()  # Immutable physical constants use defaults
     
-    config.Np = params["Np"]
-    config.u_max = params["u_max"]
-    config.x_max = params["x_max"]
-    config.q_max = params["q_max"]
-    config.xdot_max = params["xdot_max"]
-    config.qdot_max = params["qdot_max"]
-    config.du_max = params["du_max"]
-    config.rho_slack = params["rho_slack"]
+    tuning = MPCTuning(
+        dt=params["dt"],
+        Q=np.diag(params["q_diag"]),
+        R=np.array([[params["r_val"]]]),
+        S=np.diag(params["s_diag"]),
+        Np=params["Np"],
+        auto_dare=params.get("auto_dare", True),
+    )
+    
+    constraints = ConstraintLimits(
+        u_max=params["u_max"],
+        x_max=params["x_max"],
+        q_max=params["q_max"],
+        xdot_max=params["xdot_max"],
+        qdot_max=params["qdot_max"],
+        du_max=params["du_max"],
+        rho_slack=params["rho_slack"],
+    )
+    
+    disturbance = DisturbanceConfig(
+        noise_mean=params["noise_mean"],
+        noise_peak=params["noise_peak"],
+        random_seed=params["random_seed"],
+        disturbances=params["disturbances"],
+    )
+    
+    return physics, tuning, constraints, disturbance
 
-
-    config.noise_mean = params["noise_mean"]
-    config.noise_peak = params["noise_peak"]
-    config.random_seed = params["random_seed"]
-    config.disturbances = params["disturbances"]
 
 def run_simulation(gui_params):
 
-    override_config(gui_params)
+    physics, tuning, constraints, disturbance = build_config(gui_params)
     
-
     from src.physics.plant import CartPolePlant
     from src.visualization.gui import CartPoleGUI
     from src.controllers.mpc_core import MPCController
     from src.reference.governor import ReferenceGovernor
     
-    dt = config.dt
+    dt = tuning.dt
     t_final = gui_params["t_final"]
     total_steps = int(t_final / dt)
     
 
-    plant = CartPolePlant(state_init=gui_params["x0"])
-    gui = CartPoleGUI()
+    plant = CartPolePlant(state_init=gui_params["x0"], physics=physics)
+    gui = CartPoleGUI(physics=physics)
     gui.show_ghost = gui_params["ghost_trajectory"]
     
 
-    controller = MPCController()
+    controller = MPCController(physics=physics, tuning=tuning, constraints=constraints)
     
     tracking_mode = gui_params["tracking_mode"]
     tracking_val = gui_params["tracking_val"]
@@ -78,20 +90,20 @@ def run_simulation(gui_params):
     settle_step = None
     
 
-    noise_mean = gui_params["noise_mean"]
-    noise_peak = gui_params["noise_peak"]
-    disturbances = gui_params["disturbances"]
-    rng_seed = gui_params["random_seed"]
+    noise_mean = disturbance.noise_mean
+    noise_peak = disturbance.noise_peak
+    disturbances = disturbance.disturbances
+    rng_seed = disturbance.random_seed
     rng = np.random.default_rng(rng_seed)
     
 
-    gov = ReferenceGovernor(mode=tracking_mode)
+    gov = ReferenceGovernor(mode=tracking_mode, physics=physics, q_max=constraints.q_max)
     gov.target_val = tracking_val
     gov.start_pos = gui_params["x0"][0]
     gov.start_vel = gui_params["x0"][2]
     
 
-    print(f"\n--- Starting {tracking_mode} Mode ({t_final}s, Np={config.Np}, dt={dt}) ---")
+    print(f"\n--- Starting {tracking_mode} Mode ({t_final}s, Np={tuning.Np}, dt={dt}) ---")
     startTime_real = time.time()
     
     for step in range(total_steps):
@@ -185,7 +197,7 @@ def run_simulation(gui_params):
     u_peak = np.max(np.abs(forces_history))
     energy = np.sum(forces_history**2) * dt
     cost = sum(
-        ((s - xd) @ config.Q @ (s - xd) + f * config.R[0, 0] * f) * dt
+        ((s - xd) @ tuning.Q @ (s - xd) + f * tuning.R[0, 0] * f) * dt
         for s, xd, f in zip(states_history, x_d_history, forces_history)
     )
     
@@ -198,12 +210,12 @@ def run_simulation(gui_params):
     print(f"  Control Energy:     {energy:.4f}")
     
 
-    soft_limits = [config.x_max, config.q_max, config.xdot_max, config.qdot_max]
+    soft_limits = [constraints.x_max, constraints.q_max, constraints.xdot_max, constraints.qdot_max]
     soft_labels = ['x', 'q', 'x_dot', 'q_dot']
     any_soft_violation = False
     
     print(f"\n--- Constraints ---")
-    print(f"  [Hard] F_max = {u_peak:.2f} / {config.u_max:.1f} N")
+    print(f"  [Hard] F_max = {u_peak:.2f} / {constraints.u_max:.1f} N")
     for i, (lbl, limit) in enumerate(zip(soft_labels, soft_limits)):
         peak = np.max(np.abs(states_history[:, i]))
         if peak > limit:
@@ -215,8 +227,11 @@ def run_simulation(gui_params):
 
 
     if gui_params["save_log"]:
+        actual_s_diag = controller.S.diagonal().tolist() if hasattr(controller, 'S') else gui_params["s_diag"]
+        
         log_data = {
             **gui_params,
+            "s_diag": actual_s_diag,
             "settle_time": settle_time,
             "x_peak": x_peak,
             "q_peak": q_peak,

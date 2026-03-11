@@ -1,13 +1,12 @@
-
-
 import numpy as np
-from src.config import M, m, L, g, b, c
+from src.config import PhysicalParams
 
 
 class CartPolePlant:
     """Nonlinear cart-pole physics simulator using RK4 integration."""
 
-    def __init__(self, state_init=None):
+    def __init__(self, state_init=None, physics: PhysicalParams = None):
+        self.physics = physics or PhysicalParams()
         if state_init is not None:
             self.state = np.array(state_init, dtype=float)
         else:
@@ -15,11 +14,17 @@ class CartPolePlant:
 
     def _dynamics(self, state, u):
         x, q, x_dot, q_dot = state
-        
+        M = self.physics.M
+        m = self.physics.m
+        L = self.physics.L
+        g = self.physics.g
+        b = self.physics.b
+        c = self.physics.c
+
         sin_q = np.sin(q)
         cos_q = np.cos(q)
 
-        denom = M + m - m * cos_q**2  # = M + m * sin^2(q)
+        denom = M + m - m * cos_q**2
 
         x_ddot = (u - b * x_dot 
                   - m * L * q_dot**2 * sin_q 

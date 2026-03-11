@@ -1,5 +1,3 @@
-
-
 import tkinter as tk
 from tkinter import ttk
 import numpy as np
@@ -119,20 +117,34 @@ def show_mpc_panel():
     ttk.Separator(root, orient="horizontal").grid(row=row, column=0, columnspan=4, sticky="ew", padx=10, pady=5)
     row += 1
     ttk.Label(root, text="S Matrix (diagonal, terminal)", font=("", 11, "bold")).grid(
-        row=row, column=0, columnspan=4, sticky="w", padx=10, pady=(5, 5))
+        row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(5, 5))
+        
+    vars_["auto_dare"] = tk.BooleanVar(value=True)
+    dare_cb = ttk.Checkbutton(root, text="Auto-calculate via DARE", variable=vars_["auto_dare"])
+    dare_cb.grid(row=row, column=2, columnspan=2, sticky="e", padx=10)
     row += 1
 
     s_defaults = np.diag(config.S).tolist()
     s_labels = ["S11 (x):", "S22 (q):", "S33 (dx):", "S44 (dq):"]
     s_keys = ["s0", "s1", "s2", "s3"]
+    s_entries = []
     for i, (label, key) in enumerate(zip(s_labels, s_keys)):
         col = (i % 2) * 2
         if i % 2 == 0 and i > 0:
             row += 1
         ttk.Label(root, text=label).grid(row=row, column=col, sticky="e", padx=(10, 5))
         vars_[key] = tk.StringVar(value=str(round(s_defaults[i], 4)))
-        ttk.Entry(root, textvariable=vars_[key], width=12).grid(
-            row=row, column=col + 1, sticky="w", padx=(0, 10))
+        s_entry = ttk.Entry(root, textvariable=vars_[key], width=12)
+        s_entry.grid(row=row, column=col + 1, sticky="w", padx=(0, 10))
+        s_entries.append(s_entry)
+        
+    def _toggle_dare(*args):
+        state = "disabled" if vars_["auto_dare"].get() else "normal"
+        for entry in s_entries:
+            entry.config(state=state)
+            
+    vars_["auto_dare"].trace_add("write", _toggle_dare)
+    _toggle_dare()
     row += 1
 
     # Module D: MPC Horizon & Bounds
@@ -275,6 +287,7 @@ def show_mpc_panel():
             "q_diag": [float(vars_[f"q{i}"].get()) for i in range(4)],
             "r_val": float(vars_["r0"].get()),
             "s_diag": [float(vars_[f"s{i}"].get()) for i in range(4)],
+            "auto_dare": vars_["auto_dare"].get(),
 
             "Np": int(vars_["np_val"].get()),
             "u_max": float(vars_["u_max"].get()),

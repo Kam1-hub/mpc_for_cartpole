@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from collections import deque
-from src.config import L
+from src.config import PhysicalParams
 
 plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "sans-serif"]
 plt.rcParams["axes.unicode_minus"] = False
@@ -13,10 +13,11 @@ class CartPoleGUI:
 
     CART_W = 0.4
     CART_H = 0.2
-    POLE_LEN = 2 * L
     MAX_HISTORY = 1000
 
-    def __init__(self):
+    def __init__(self, physics: PhysicalParams = None):
+        self.physics = physics or PhysicalParams()
+        self.POLE_LEN = 2 * self.physics.L
         plt.ion()
 
         self.fig = plt.figure(figsize=(18, 10))

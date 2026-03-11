@@ -6,12 +6,25 @@ from src.controllers.base_controller import BaseController
 class MPCController(BaseController):
     """LTI-MPC controller using CVXPY with incremental input formulation."""
 
-    def __init__(self):
+    def __init__(self, physics=None, tuning=None, constraints=None):
         super().__init__()
 
         import scipy.linalg
-        from src.config import M, m, L, g, dt, Np, Q, R, S
-        from src.config import u_max, x_max, q_max, xdot_max, qdot_max, du_max, rho_slack
+        from scipy.linalg import solve_discrete_are
+        from src.config import PhysicalParams, MPCTuning, ConstraintLimits
+
+        physics = physics or PhysicalParams()
+        tuning = tuning or MPCTuning()
+        constraints = constraints or ConstraintLimits()
+
+        M, m, L, g = physics.M, physics.m, physics.L, physics.g
+        dt, Np, Q, R, S = tuning.dt, tuning.Np, tuning.Q, tuning.R, tuning.S
+        auto_dare = tuning.auto_dare
+        u_max = constraints.u_max
+        x_max, q_max = constraints.x_max, constraints.q_max
+        xdot_max, qdot_max = constraints.xdot_max, constraints.qdot_max
+        du_max, rho_slack = constraints.du_max, constraints.rho_slack
+
         self.Np = Np
         print("MPC offline matrices construction...")
 
@@ -64,6 +77,14 @@ class MPCController(BaseController):
 
         self.Phi = Phi
         self.Gamma = Gamma
+
+        # DARE: compute infinite horizon LQR terminal cost
+        if auto_dare:
+            P = solve_discrete_are(self.A_d, self.B_d, Q, R)
+            S = P
+            print("  [DARE] Terminal cost automatically calculated via infinite-horizon LQR.")
+
+        self.S = S
 
         Q_aug = np.block([[Q, np.zeros((4, 1))], [np.zeros((1, 4)), np.zeros((1, 1))]])
         S_aug = np.block([[S, np.zeros((4, 1))], [np.zeros((1, 4)), np.zeros((1, 1))]])
@@ -124,12 +145,12 @@ class MPCController(BaseController):
         slacked_objective = quad_term + lin_term + rho_slack * cp.sum(cp.square(self.eps))
         objective = cp.Minimize(slacked_objective)
 
-        constraints = [
+        constraints_list = [
             M_hard @ self.Delta_U <= beta_hard.flatten() + b_hard @ self.x_init,
             M_soft @ self.Delta_U <= self.dynamic_beta_soft + b_soft @ self.x_init + L_eps @ self.eps
         ]
 
-        self.prob = cp.Problem(objective, constraints)
+        self.prob = cp.Problem(objective, constraints_list)
         print("MPC optimization problem compiled successfully (DPP).")
 
     def compute_action(self, current_augmented_error, current_reference=None):
